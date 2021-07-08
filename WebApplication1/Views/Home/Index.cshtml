@@ -1,0 +1,254 @@
+﻿@{
+    ViewData["Title"] = "Home Pagee";
+}
+
+<div class="row">
+    <div class="col-4">
+        <h1 class="display-4">Welcome</h1>
+    </div>
+    <div class="col-4"></div>
+    <div class="col-4">
+       <div class="alert alert-danger text-center" role="alert" id="reqMachineCnt"></div>
+    </div>
+
+
+</div>
+<div class="row">
+    <div id="machineList" class="col-12">
+
+    </div>
+
+
+</div>
+<div class="container">
+    <div class="row">&nbsp;</div>
+    <div class="row">
+        <div class="col-2">User</div>
+        <div class="col-4"><input type="text" id="userInput" /></div>
+    </div>
+    <div class="row">
+        <div class="col-2">Message</div>
+        <div class="col-4"><input type="text" id="messageInput" /></div>
+    </div>
+    <div class="row">&nbsp;</div>
+    <div class="row">
+        <div class="col-6">
+            <input type="button" id="sendButton" value="Send Message" />
+        </div>
+    </div>
+</div>
+<div class="row">
+    <div class="col-12">
+        <hr />
+    </div>
+</div>
+<div class="row">
+    <div class="col-6">
+        <ul id="messagesList"></ul>
+    </div>
+</div>
+<script src="~/lib/microsoft/signalr/dist/browser/signalr.js"></script>
+<script>
+    //"use strict";
+    //var connection = new signalR.HubConnectionBuilder().withUrl("/chatHub").build();
+
+    ////Disable send button until connection is established
+    //document.getElementById("sendButton").disabled = true;
+
+    //connection.on("ReceiveMessage", function (user, message) {
+    //    var msg = message.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    //    var encodedMsg = user + " says " + msg;
+    //    var li = document.createElement("li");
+    //    li.textContent = encodedMsg;
+    //    document.getElementById("messagesList").appendChild(li);
+    //});
+
+    //connection.start().then(function () {
+    //    document.getElementById("sendButton").disabled = false;
+    //    console.log("chat");
+    //}).catch(function (err) {
+    //    return console.error(err.toString());
+    //});
+
+    //document.getElementById("sendButton").addEventListener("click", function (event) {
+    //    var user = document.getElementById("userInput").value;
+    //    var message = document.getElementById("messageInput").value;
+    //    connection.invoke("SendMessage", user, message).catch(function (err) {
+    //        return console.error(err.toString());
+    //    });
+    //    event.preventDefault();
+    //});
+</script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<script>
+    //嘗試連線次數
+    let reqMachineCnt = 0;
+    //是否收到資料或需要重連
+    let isGetMachine = false;
+
+    const reqMachineCntLbl = document.querySelector("#reqMachineCnt");
+    let MachineItemList = []; //每一個Machine
+    let MachineChartList = [];//存MachineItemList對應到的Chart
+
+    let MonitorConnection = new signalR.HubConnectionBuilder().withUrl("/MonitorHub").build();
+    MonitorConnection.serverTimeoutInMilliseconds = 1000*10;//多久沒收到資料視為斷線
+
+    //接收MachineId, MachineData(最新十筆), 更新畫面
+    MonitorConnection.on("ReceiveMachineData", function (MachineId, MachineData) {
+        console.log(MachineId.toString());
+       
+        let machineDataObj = JSON.parse(MachineData);
+        console.log(machineDataObj);
+        let labelArray = [];
+        let dataArray = [];
+        //把十筆資料送到lblArray,dataArray
+        machineDataObj.forEach(function (ele) {
+            
+            labelArray.push(ele.Time);
+            dataArray.push(ele.Temperature);
+        });
+        //更新
+        RenderEachChart(labelArray, dataArray, MachineId);
+        
+    });
+    //function RenderChart(lblAry, dataAry, id, cb) {
+    //    cb(lblAry, daraAry, id);
+    //};
+    //失敗因為call by ref 
+    //RenderChart(labelArray, dataArray, MachineId, RenderEachChart);
+    //就執行渲染前資料就已經消失
+
+    //更新其中一個圖表
+    function RenderEachChart(lblAry, dataAry, id) {
+        let machineKey = `id${id}machineChart`;
+
+        MachineChartList[machineKey].data.labels = lblAry;
+        let datasetsObj = {
+            label: 'temperature',
+            data: dataAry,
+            backgroundColor: 'rgba(255, 99, 132)',
+            borderColor: 'rgba(255, 99, 132)',
+            borderWidth: 5
+        }
+        //MachineChartList[machineKey].data.datasets.clear();
+        MachineChartList[machineKey].data.datasets.length = 0;
+        MachineChartList[machineKey].data.datasets.push(datasetsObj);
+        MachineChartList[machineKey].update();
+    };
+    
+
+    //接收傳來的MacchineList, 
+    MonitorConnection.on("ReceiveMachine", function (MachineList) {
+
+        //收到了MachineList, 就不再發出請求
+        if (isGetMachine == false) {
+            isGetMachine = true;
+            //reqMachineCntLbl.style.visibility = "hidden";
+            clearInterval(requestMachineTmr);
+        }
+
+        //把不再列表上的更新
+        let machineList = document.querySelector("#machineList");
+        let objMachineList = JSON.parse(MachineList);
+        objMachineList.forEach(function (ele) {
+            console.log(ele);
+            if (MachineItemList.findIndex(item => { return (item.Id == ele.Id) }) != -1) {
+                console.log("repeat");
+            } else {
+                //console.log(MachineItemList);
+                MachineItemList.push(ele);
+
+                //圖表模板
+                let addNode = document.createElement("div");
+                addNode.classList.add("row");
+                let machineTemplate = `
+                <div class="col-2">
+                    <h1 class="display-4">${ele.Name}</h1>
+                </div>
+                <div class="col-10">
+                    <canvas id="myChart-${ele.Id}" width="400" height="50"></canvas>
+                </div>`;
+                addNode.innerHTML = machineTemplate;
+
+                //圖表Id取名為myChart-'machineId'
+                let id = `myChart-${ele.Id}`;
+                machineList.appendChild(addNode);
+                let machineChart = document.querySelector('#' + id);
+                //把Id 對Chart 存入 MachineChartList
+                //key: machineId   value: Chart
+                MachineChartList[`id${ele.Id}machineChart`] = new Chart(machineChart, {
+                    type: 'line',
+                    labels: [],
+                    data: {
+                        label: [],
+                        datasets:[],
+                    },
+                    options: {
+                        scales: {
+                            y: {
+                                beginAtZero: true
+                            }
+                        },
+                        animation: {
+                            duration: 0
+                        }
+                    }
+                })
+                console.log(machineChart);
+            }
+        });
+        console.log(MachineChartList);
+        
+    });
+
+    let requestMachineTmr;//重連Timer, 1秒1次
+    //初次連線
+    MonitorConnection.start().then(function () {
+        console.log("monitor start");
+
+        requestMachineTmr = setInterval(() => {
+            
+            console.log("request");
+            reqMachineCnt += 1;
+            reqMachineCntLbl.textContent = reqMachineCnt.toString();
+            MonitorConnection.invoke("RequestMachineData")
+                .catch(function (err) {
+                return console.log(err.toString());
+                });
+        }, 1000);
+        
+        console.log("this" + requestMachineTmr.toString());
+        
+    }).catch(function (err) {
+        return console.error(err.toString());
+    });
+
+    //收到斷線時, 定時重連
+    MonitorConnection.onclose(() => {
+        alert("close");
+        isGetMachine = false;
+        //重連
+        MonitorConnection.start().then(function () {
+            console.log("monitor start");
+
+            //定時重連, 收到資料就關閉
+            requestMachineTmr = setInterval(() => {
+
+                console.log("request");
+                reqMachineCnt += 1;
+                reqMachineCntLbl.textContent = reqMachineCnt.toString();
+                //請求MachineList
+                MonitorConnection.invoke("RequestMachineData")
+                    .catch(function (err) {
+                        return console.log(err.toString());
+                    });
+            }, 1000);
+
+
+        }).catch(function (err) {
+            return console.error(err.toString());
+        });
+    });
+    
+</script>
